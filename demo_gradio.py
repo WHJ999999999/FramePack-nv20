@@ -1,6 +1,6 @@
 from diffusers_helper.hf_login import login
 import os
-
+import torch
 # ===== Memory Optimization Config =====
 os.environ['HF_HOME'] = os.path.abspath(os.path.join(os.path.dirname(__file__), './hf_download'))
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True,garbage_collection_threshold:0.8"
@@ -8,7 +8,7 @@ os.environ["ACCELERATE_USE_FSDP"] = "true"
 if 'kaggle' in os.environ.get('KAGGLE_URL_BASE',''):
     torch.cuda.set_per_process_memory_fraction(0.9)
 
-import torch
+
 import gradio as gr
 import traceback
 import einops
