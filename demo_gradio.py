@@ -119,7 +119,7 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
 
     job_id = generate_timestamp()
 
-    stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Starting ...')))))
+    stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Starting ...'))))
 
     try:
         # Clean GPU
