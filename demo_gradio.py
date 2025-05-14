@@ -58,23 +58,37 @@ def clean_memory():
     print(f"Memory cleaned - Allocated: {torch.cuda.memory_allocated()/1e9:.2f}GB")
 
 def load_model_safely(model_class, pretrained_path, device, **kwargs):
-    with init_empty_weights():
-        config = model_class.config_class.from_pretrained(pretrained_path, **kwargs)
-        model = model_class.from_config(config)
+    """Universal safe loader that works with all model types"""
+    try:
+        # First try standard from_pretrained
+        model = model_class.from_pretrained(pretrained_path, **kwargs)
+    except Exception as e:
+        print(f"Standard loading failed, trying empty weights approach. Error: {str(e)}")
+        # Fallback to empty weights + checkpoint loading
+        with init_empty_weights():
+            if hasattr(model_class, '_from_config'):  # For models like Llama
+                config = model_class.config_class.from_pretrained(pretrained_path, **kwargs)
+                model = model_class._from_config(config)
+            else:  # For standard models
+                config = model_class.config_class.from_pretrained(pretrained_path, **kwargs)
+                model = model_class(config)
+        
+        model = load_checkpoint_and_dispatch(
+            model,
+            pretrained_path,
+            device_map="auto",
+            offload_folder="./offload",
+            no_split_module_classes=["Attention"],
+            **kwargs
+        )
     
-    return load_checkpoint_and_dispatch(
-        model,
-        pretrained_path,
-        device_map="auto",
-        offload_folder="./offload",
-        no_split_module_classes=["Attention"],
-        **kwargs
-    ).to(device)
+    return model.to(device)
 
 # ===== Model Loading =====
 clean_memory()
 print("Loading models with CPU offloading...")
 
+# Text encoders
 text_encoder = load_model_safely(
     LlamaModel,
     "hunyuanvideo-community/HunyuanVideo",
@@ -91,6 +105,7 @@ text_encoder_2 = load_model_safely(
     torch_dtype=torch.float16
 )
 
+# VAE and Transformer
 vae = load_model_safely(
     AutoencoderKLHunyuanVideo,
     "hunyuanvideo-community/HunyuanVideo",
