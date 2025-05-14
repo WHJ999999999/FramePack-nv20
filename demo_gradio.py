@@ -146,14 +146,14 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
     total_latent_sections = int(max(round(total_latent_sections), 1))
     job_id = generate_timestamp()
 
-    stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Starting ...')))
+    stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Starting ...'))))
 
     try:
         if not high_vram:
             unload_complete_models(text_encoder, text_encoder_2, image_encoder, vae, transformer)
 
         # Text encoding
-        stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Text encoding ...')))
+        stream.output_queue.push(('progress', (None, '', make_progress_bar_html(0, 'Text encoding ...'))))
         if not high_vram:
             fake_diffusers_current_device(text_encoder, devices[0])
             load_model_as_complete(text_encoder_2, target_device=devices[0])
