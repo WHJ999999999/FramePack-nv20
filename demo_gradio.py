@@ -1,13 +1,14 @@
 from diffusers_helper.hf_login import login
 import os
 import torch
+
 # ===== Memory Optimization Config =====
 os.environ['HF_HOME'] = os.path.abspath(os.path.join(os.path.dirname(__file__), './hf_download'))
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True,garbage_collection_threshold:0.8"
-os.environ["ACCELERATE_USE_FSDP"] = "true" 
+os.environ["ACCELERATE_USE_FSDP"] = "true"
+os.environ["XFORMERS_FORCE_DISABLE_TRITON"] = "1"
 if 'kaggle' in os.environ.get('KAGGLE_URL_BASE',''):
     torch.cuda.set_per_process_memory_fraction(0.9)
-
 
 import gradio as gr
 import traceback
@@ -57,32 +58,56 @@ def clean_memory():
     gc.collect()
     print(f"Memory cleaned - Allocated: {torch.cuda.memory_allocated()/1e9:.2f}GB")
 
+def get_device_map(num_gpus):
+    # Alternate assignment of layers for 2 GPUs, adjust as needed for your model
+    # If you know your model's layer/module names, assign them here
+    return {
+        "": 0,  # fallback
+    } if num_gpus == 1 else {
+        "transformer.layers.0": 0,
+        "transformer.layers.1": 1,
+        "transformer.layers.2": 0,
+        "transformer.layers.3": 1,
+        "": 0,
+    }
+
+def get_max_memory(num_gpus):
+    # 2 GPUs: 14.5GB each, leave headroom for CUDA context, etc.
+    # CPU offload: 28GB
+    if num_gpus == 1:
+        return {0: "13GB", "cpu": "28GB"}
+    else:
+        return {0: "13GB", 1: "13GB", "cpu": "28GB"}
+
 def load_model_safely(model_class, pretrained_path, device, **kwargs):
-    """Universal safe loader that works with all model types"""
+    """Universal safe loader that works with all model types, with sharded safetensors and device_map support."""
     try:
-        # First try standard from_pretrained
         model = model_class.from_pretrained(pretrained_path, **kwargs)
+        model = model.to(device)
     except Exception as e:
         print(f"Standard loading failed, trying empty weights approach. Error: {str(e)}")
-        # Fallback to empty weights + checkpoint loading
         with init_empty_weights():
-            if hasattr(model_class, '_from_config'):  # For models like Llama
+            if hasattr(model_class, '_from_config'):
                 config = model_class.config_class.from_pretrained(pretrained_path, **kwargs)
                 model = model_class._from_config(config)
-            else:  # For standard models
+            else:
                 config = model_class.config_class.from_pretrained(pretrained_path, **kwargs)
                 model = model_class(config)
-        
+        # Use device_map and max_memory for multi-GPU and CPU offload
+        num_gpus = torch.cuda.device_count()
+        device_map = get_device_map(num_gpus)
+        max_memory = get_max_memory(num_gpus)
         model = load_checkpoint_and_dispatch(
             model,
             pretrained_path,
-            device_map="auto",
+            device_map=device_map if num_gpus > 1 else "auto",
+            max_memory=max_memory,
             offload_folder="./offload",
             no_split_module_classes=["Attention"],
-            **kwargs
+            dtype=kwargs.get("torch_dtype", torch.float16),
+            use_safetensors=True
         )
-    
-    return model.to(device)
+    return model
 
 # ===== Model Loading =====
 clean_memory()
@@ -136,9 +161,15 @@ transformer.high_quality_fp32_output_for_inference = True
 print('Enabled FP32 output for transformer')
 
 if not high_vram:
-    vae.enable_slicing()
-    vae.enable_tiling()
-    transformer.gradient_checkpointing_enable()
+    try:
+        vae.enable_slicing()
+        vae.enable_tiling()
+    except Exception:
+        pass
+    try:
+        transformer.gradient_checkpointing_enable()
+    except Exception:
+        pass
     print("Enabled memory-saving features")
 
 # ===== GPU Management =====
@@ -148,6 +179,7 @@ if not high_vram:
     DynamicSwapInstaller.install_model(text_encoder_2, device=devices[0])
     DynamicSwapInstaller.install_model(image_encoder, device=devices[0])
     DynamicSwapInstaller.install_model(vae, device=devices[-1])
+
 
 # ===== Original Code Continues =====
 stream = AsyncStream()
@@ -330,7 +362,6 @@ def worker(input_image, prompt, n_prompt, seed, total_second_length, latent_wind
     finally:
         stream.output_queue.push(('end', None))
 
-# [Rest of your original Gradio interface code remains unchanged]
 def process(input_image, prompt, n_prompt, seed, total_second_length, latent_window_size, steps, cfg, gs, rs, gpu_memory_preservation, use_teacache):
     global stream
     assert input_image is not None, 'No input image!'
