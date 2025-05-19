@@ -75,9 +75,9 @@ def get_max_memory(num_gpus):
     # 2 GPUs: 14.5GB each, leave headroom for CUDA context, etc.
     # CPU offload: 28GB
     if num_gpus == 1:
-        return {0: "13GB", "cpu": "28GB"}
+        return {0: "14GB", "cpu": "28GB"}
     else:
-        return {0: "13GB", 1: "13GB", "cpu": "28GB"}
+        return {0: "14GB", 1: "14GB", "cpu": "28GB"}
 
 def load_model_safely(model_class, pretrained_path, device, **kwargs):
     """Universal safe loader that works with all model types, with sharded safetensors and device_map support."""
